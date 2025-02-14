@@ -170,6 +170,38 @@ function getModel(): BaseChatModel {
   return model
 }
 
+async function invokeWithRetry(
+  model: any,
+  messages: any[],
+  maxRetries: number = 5
+): Promise<any> {
+  let attempt = 0
+  const baseDelay = 1000 // Start with a 1 second delay
+
+  while (attempt < maxRetries) {
+    try {
+      const response = await model.invoke(messages)
+      return response // Return the response if successful
+    } catch (error) {
+      const errorMessage = (error as Error).message // Type assertion to Error
+      if (errorMessage.includes('429 Too Many Requests')) {
+        attempt++
+        const delay = baseDelay * Math.pow(2, attempt) // Exponential backoff
+        core.warning(
+          `Rate limit exceeded. Retrying in ${delay}ms... (Attempt ${attempt})`
+        )
+        await wait(delay) // Wait before retrying
+      } else {
+        // Handle other errors as needed
+        core.error(`Error invoking model: ${errorMessage}`)
+        throw error // Rethrow the error if it's not a rate limit issue
+      }
+    }
+  }
+
+  throw new Error('Max retries reached. Unable to invoke model.')
+}
+
 async function inputUnderstandingAgentNode(
   // eslint-disable-next-line
   _state: typeof StateAnnotation.State
@@ -276,7 +308,7 @@ async function reviewCommentsAgentNode(
 
     const fullFileContent = await getFileContent(listFile.filename)
 
-    const response = await modelWithStructuredOutput.invoke([
+    const response = await invokeWithRetry(modelWithStructuredOutput, [
       ...state.messages,
       new HumanMessage(`Based on given informations from previous chats / messages, and given information below, please create code review comment. You must call "response" tool to give review,
 except the file doesn't need to be reviewed (dist files, generated files, and any other files that don't need to be reviewed.) or the file is already good, no need to comment, lgtm,, in that case, just set skip=true for the tool parameter.
