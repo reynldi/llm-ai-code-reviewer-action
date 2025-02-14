@@ -52476,6 +52476,14 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 # Repository and Pull Request Information
 ${pullRequestContext}`)
     ]);
+    const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
+    const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
+    const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
+    const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
+    const totalCost = inputCost + outputCost;
+    core.info(`[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
     return { messages: [response] };
 }
 async function knowledgeUpdatesAgentNode(state) {
@@ -52487,17 +52495,14 @@ async function knowledgeUpdatesAgentNode(state) {
         new messages_1.HumanMessage(`Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
     ]);
-    if (AI_PROVIDER === AI_PROVIDER_GEMINI &&
-        AI_PROVIDER_MODEL.includes('flash')) {
-        const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
-        const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
-        const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
-        const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
-        const totalCost = inputCost + outputCost;
-        core.info(`[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`);
-        core.info(`[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`);
-        core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
-    }
+    const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
+    const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
+    const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
+    const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
+    const totalCost = inputCost + outputCost;
+    core.info(`[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
     return { messages: [response] };
 }
 async function reviewCommentsAgentNode(state) {
