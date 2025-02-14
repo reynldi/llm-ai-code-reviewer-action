@@ -110,17 +110,16 @@ function getModel(): BaseChatModel {
 
       core.info(`Model: ${modelName}`)
 
-      // Get token counts, handling different provider structures
       const inputTokens =
+        output.llmOutput?.promptTokenCount ||
         output.llmOutput?.tokenUsage?.promptTokens ||
-        output.llmOutput?.tokenCounts?.promptTokens ||
-        output.llmOutput?.totalTokens?.prompt ||
+        (output.generations?.[0] as any)?.tokenUsage?.promptTokens ||
         0
 
       const outputTokens =
+        output.llmOutput?.completionTokenCount ||
         output.llmOutput?.tokenUsage?.completionTokens ||
-        output.llmOutput?.tokenCounts?.completionTokens ||
-        output.llmOutput?.totalTokens?.completion ||
+        (output.generations?.[0] as any)?.tokenUsage?.completionTokens ||
         0
 
       if (costs) {
