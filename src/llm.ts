@@ -74,9 +74,9 @@ const StateAnnotation = Annotation.Root({
 })
 
 const MODEL_COSTS = {
-  'gemini-1.5-pro': {
+  'gemini-2.0-flash': {
     input: 0.00025, // per 1K input tokens
-    output: 0.0005 // per 1K output tokens
+    output: 0.00075 // per 1K output tokens
   },
   'gemini-1.5-flash': {
     input: 0.0001, // per 1K input tokens
