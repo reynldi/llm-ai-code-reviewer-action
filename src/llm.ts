@@ -26,6 +26,8 @@ import { PullRequestReviewComment } from './types'
 import { tool } from '@langchain/core/tools'
 import { knowledgeBaseTools, knowledgeBaseToolsNode } from './llm_tools'
 import { wait } from './utils'
+import { getModelName } from '@langchain/core/language_models/base'
+import { CallbackManager } from '@langchain/core/callbacks/manager'
 
 const AI_PROVIDER = core.getInput('ai_provider', {
   required: true,
@@ -72,8 +74,57 @@ const StateAnnotation = Annotation.Root({
   })
 })
 
+const MODEL_COSTS = {
+  'gemini-1.5-pro': {
+    input: 0.00025, // per 1K input tokens
+    output: 0.0005  // per 1K output tokens
+  },
+  'gemini-1.5-flash': {
+    input: 0.0001, // per 1K input tokens
+    output: 0.0002 // per 1K output tokens
+  },
+  'mixtral-8x7b-32768': {
+    input: 0.0027,  // per 1K input tokens  
+    output: 0.0027  // per 1K output tokens
+  }
+} as const
+
+interface CostTracker {
+  inputTokens: number
+  outputTokens: number 
+  totalCost: number
+}
+
+let costTracker: CostTracker = {
+  inputTokens: 0,
+  outputTokens: 0,
+  totalCost: 0
+}
+
 function getModel(): BaseChatModel {
   let model: BaseChatModel | undefined
+  
+  const callbacks = CallbackManager.fromHandlers({
+    handleLLMEnd: async (output, runId, parentRunId, tags) => {
+      const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL
+      const costs = MODEL_COSTS[modelName as keyof typeof MODEL_COSTS]
+      
+      if (costs) {
+        const inputCost = (output.llmOutput?.tokenUsage?.promptTokens || 0) * costs.input / 1000
+        const outputCost = (output.llmOutput?.tokenUsage?.completionTokens || 0) * costs.output / 1000
+        
+        costTracker.inputTokens += output.llmOutput?.tokenUsage?.promptTokens || 0
+        costTracker.outputTokens += output.llmOutput?.tokenUsage?.completionTokens || 0
+        costTracker.totalCost += inputCost + outputCost
+
+        core.info(`[Cost Tracking] Model: ${modelName}`)
+        core.info(`Input Tokens: ${output.llmOutput?.tokenUsage?.promptTokens}`)
+        core.info(`Output Tokens: ${output.llmOutput?.tokenUsage?.completionTokens}`)
+        core.info(`Cost for this call: $${(inputCost + outputCost).toFixed(4)}`)
+        core.info(`Total cost so far: $${costTracker.totalCost.toFixed(4)}`)
+      }
+    }
+  })
 
   if (AI_PROVIDER === AI_PROVIDER_GROQ && GROQ_API_KEY) {
     model = new ChatGroq({
@@ -81,14 +132,16 @@ function getModel(): BaseChatModel {
       temperature: 0,
       maxTokens: undefined,
       maxRetries: 2,
-      apiKey: GROQ_API_KEY
+      apiKey: GROQ_API_KEY,
+      callbacks: callbacks
     })
   } else if (AI_PROVIDER === AI_PROVIDER_GEMINI && GOOGLE_GEMINI_API_KEY) {
     model = new ChatGoogleGenerativeAI({
       model: AI_PROVIDER_MODEL,
       apiKey: GOOGLE_GEMINI_API_KEY,
       temperature: 0,
-      maxRetries: 2
+      maxRetries: 2,
+      callbacks: callbacks
     })
   } else {
     core.setFailed(`API KEY for provider: ${AI_PROVIDER} is not provided!`)
@@ -421,4 +474,9 @@ export async function reviewPullRequest(): Promise<void> {
     },
     { configurable: { thread_id: '42' } }
   )
+
+  core.info('\n=== Final Cost Summary ===')
+  core.info(`Total Input Tokens: ${costTracker.inputTokens}`)
+  core.info(`Total Output Tokens: ${costTracker.outputTokens}`) 
+  core.info(`Total Cost: $${costTracker.totalCost.toFixed(4)}`)
 }
