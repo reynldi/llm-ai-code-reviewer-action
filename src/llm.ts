@@ -57,9 +57,6 @@ const AI_PROVIDER_GEMINI = 'GEMINI'
 const FILE_CHANGES_PATCH_TEXT_LIMIT = 10000
 const FULL_SOURCE_CODE_TEXT_LIMIT = 10000
 
-const GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS = 0.1
-const GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS = 0.4
-
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
@@ -136,34 +133,30 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 ${pullRequestContext}`)
   ])
 
-  const inputTokens =
-    (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
-  const outputTokens =
-    (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
-
-  const inputCost =
-    (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
-  const outputCost =
-    (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
-  const totalCost = inputCost + outputCost
-
   core.info(
-    `[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`
+    `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
   )
   core.info(
-    `[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`
+    `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
   )
-  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
-
+  core.info(
+    `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
+  )
   return { messages: [response] }
 }
 
 async function knowledgeUpdatesAgentNode(
   state: typeof StateAnnotation.State
-): Promise<{ messages: BaseMessage[] } | undefined> {
+): Promise<
+  | {
+      messages: BaseMessage[]
+    }
+  | undefined
+> {
   core.info('[LLM] - Updating knowledges...')
 
   const model = getModel()
+
   const modelWithTools = model.bindTools!(knowledgeBaseTools)
 
   const response = await modelWithTools.invoke([
@@ -172,24 +165,15 @@ async function knowledgeUpdatesAgentNode(
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
   ])
 
-  const inputTokens =
-    (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
-  const outputTokens =
-    (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
-
-  const inputCost =
-    (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
-  const outputCost =
-    (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
-  const totalCost = inputCost + outputCost
-
   core.info(
-    `[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`
+    `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
   )
   core.info(
-    `[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`
+    `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
   )
-  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
+  core.info(
+    `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
+  )
 
   return { messages: [response] }
 }
@@ -227,8 +211,6 @@ async function reviewCommentsAgentNode(
   const listFiles = await getListFiles()
 
   const comments: PullRequestReviewComment[] = []
-  let totalInputTokens = 0
-  let totalOutputTokens = 0
 
   for (let i = 0; i < listFiles.length; i++) {
     const listFile = listFiles[i]
@@ -269,14 +251,15 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 ===================================`)
     ])
 
-    // Calculate costs for this file review
-    const inputTokens =
-      (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
-    const outputTokens =
-      (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
-
-    totalInputTokens += inputTokens
-    totalOutputTokens += outputTokens
+    core.info(
+      `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
+    )
+    core.info(
+      `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
+    )
+    core.info(
+      `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
+    )
 
     if (response.tool_calls?.length) {
       const tool_call_args = response.tool_calls[0].args
@@ -292,21 +275,6 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 
     await wait(1000)
   }
-
-  const totalInputCost =
-    (totalInputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
-  const totalOutputCost =
-    (totalOutputTokens / 1_000_000) *
-    GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
-  const totalCost = totalInputCost + totalOutputCost
-
-  core.info(
-    `[LLM Pricing] - Total input tokens: ${totalInputTokens} ($${totalInputCost.toFixed(6)})`
-  )
-  core.info(
-    `[LLM Pricing] - Total output tokens: ${totalOutputTokens} ($${totalOutputCost.toFixed(6)})`
-  )
-  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
 
   return { comments }
 }
@@ -353,24 +321,15 @@ Review Comment: ${comment.comment}
 )}`)
   ])
 
-  const inputTokens =
-    (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
-  const outputTokens =
-    (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
-
-  const inputCost =
-    (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
-  const outputCost =
-    (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
-  const totalCost = inputCost + outputCost
-
   core.info(
-    `[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`
+    `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
   )
   core.info(
-    `[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`
+    `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
   )
-  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
+  core.info(
+    `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
+  )
 
   if (response.tool_calls?.length) {
     const tool_call_args = response.tool_calls[0].args
@@ -437,6 +396,16 @@ Conversations:
 ${repliesMap[topLevelComment.id].map(comment => `- ${comment.user.login === githubAuthenticatedUserLogin ? 'AI' : `Human(${comment.user.login})`}: ${comment.body}\n`)}
 `)
         ])
+
+        core.info(
+          `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
+        )
+        core.info(
+          `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
+        )
+        core.info(
+          `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
+        )
 
         await replyToReviewComment(
           topLevelComment.id,
