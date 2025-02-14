@@ -107,6 +107,8 @@ function getModel(): BaseChatModel {
     handleLLMEnd: async (output, runId, parentRunId, tags) => {
       const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL
       const costs = MODEL_COSTS[modelName as keyof typeof MODEL_COSTS]
+      core.info(`Model: ${modelName}`)
+      core.info(`costs: ${costs}`)
 
       if (costs) {
         const inputCost =

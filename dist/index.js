@@ -52450,6 +52450,8 @@ function getModel() {
         handleLLMEnd: async (output, runId, parentRunId, tags) => {
             const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL;
             const costs = MODEL_COSTS[modelName];
+            core.info(`Model: ${modelName}`);
+            core.info(`costs: ${costs}`);
             if (costs) {
                 const inputCost = ((output.llmOutput?.tokenUsage?.promptTokens || 0) * costs.input) /
                     1000;
