@@ -160,12 +160,7 @@ ${pullRequestContext}`)
 
 async function knowledgeUpdatesAgentNode(
   state: typeof StateAnnotation.State
-): Promise<
-  | {
-      messages: BaseMessage[]
-    }
-  | undefined
-> {
+): Promise<{ messages: BaseMessage[] } | undefined> {
   core.info('[LLM] - Updating knowledges...')
 
   const model = getModel()
@@ -232,6 +227,8 @@ async function reviewCommentsAgentNode(
   const listFiles = await getListFiles()
 
   const comments: PullRequestReviewComment[] = []
+  let totalInputTokens = 0
+  let totalOutputTokens = 0
 
   for (let i = 0; i < listFiles.length; i++) {
     const listFile = listFiles[i]
@@ -272,6 +269,15 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 ===================================`)
     ])
 
+    // Calculate costs for this file review
+    const inputTokens =
+      (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
+    const outputTokens =
+      (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
+
+    totalInputTokens += inputTokens
+    totalOutputTokens += outputTokens
+
     if (response.tool_calls?.length) {
       const tool_call_args = response.tool_calls[0].args
 
@@ -286,6 +292,21 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 
     await wait(1000)
   }
+
+  const totalInputCost =
+    (totalInputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
+  const totalOutputCost =
+    (totalOutputTokens / 1_000_000) *
+    GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
+  const totalCost = totalInputCost + totalOutputCost
+
+  core.info(
+    `[LLM Pricing] - Total input tokens: ${totalInputTokens} ($${totalInputCost.toFixed(6)})`
+  )
+  core.info(
+    `[LLM Pricing] - Total output tokens: ${totalOutputTokens} ($${totalOutputCost.toFixed(6)})`
+  )
+  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
 
   return { comments }
 }
