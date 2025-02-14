@@ -52451,21 +52451,24 @@ function getModel() {
             const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL;
             const costs = MODEL_COSTS[modelName];
             core.info(`Model: ${modelName}`);
-            core.info(`costs: ${costs}`);
+            // Get token counts, handling different provider structures
+            const inputTokens = output.llmOutput?.tokenUsage?.promptTokens ||
+                output.llmOutput?.tokenCounts?.promptTokens ||
+                output.llmOutput?.totalTokens?.prompt ||
+                0;
+            const outputTokens = output.llmOutput?.tokenUsage?.completionTokens ||
+                output.llmOutput?.tokenCounts?.completionTokens ||
+                output.llmOutput?.totalTokens?.completion ||
+                0;
             if (costs) {
-                const inputCost = ((output.llmOutput?.tokenUsage?.promptTokens || 0) * costs.input) /
-                    1000;
-                const outputCost = ((output.llmOutput?.tokenUsage?.completionTokens || 0) *
-                    costs.output) /
-                    1000;
-                costTracker.inputTokens +=
-                    output.llmOutput?.tokenUsage?.promptTokens || 0;
-                costTracker.outputTokens +=
-                    output.llmOutput?.tokenUsage?.completionTokens || 0;
+                const inputCost = (inputTokens * costs.input) / 1000;
+                const outputCost = (outputTokens * costs.output) / 1000;
+                costTracker.inputTokens += inputTokens;
+                costTracker.outputTokens += outputTokens;
                 costTracker.totalCost += inputCost + outputCost;
                 core.info(`[Cost Tracking] Model: ${modelName}`);
-                core.info(`Input Tokens: ${output.llmOutput?.tokenUsage?.promptTokens}`);
-                core.info(`Output Tokens: ${output.llmOutput?.tokenUsage?.completionTokens}`);
+                core.info(`Input Tokens: ${inputTokens}`);
+                core.info(`Output Tokens: ${outputTokens}`);
                 core.info(`Cost for this call: $${(inputCost + outputCost).toFixed(4)}`);
                 core.info(`Total cost so far: $${costTracker.totalCost.toFixed(4)}`);
             }
