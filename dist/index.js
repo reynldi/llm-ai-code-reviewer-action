@@ -52426,9 +52426,9 @@ const StateAnnotation = langgraph_2.Annotation.Root({
     })
 });
 const MODEL_COSTS = {
-    'gemini-2.0-flash': {
+    'gemini-1.5-pro': {
         input: 0.00025, // per 1K input tokens
-        output: 0.00075 // per 1K output tokens
+        output: 0.0005 // per 1K output tokens
     },
     'gemini-1.5-flash': {
         input: 0.0001, // per 1K input tokens

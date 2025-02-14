@@ -74,9 +74,9 @@ const StateAnnotation = Annotation.Root({
 })
 
 const MODEL_COSTS = {
-  'gemini-2.0-flash': {
+  'gemini-1.5-pro': {
     input: 0.00025, // per 1K input tokens
-    output: 0.00075 // per 1K output tokens
+    output: 0.0005 // per 1K output tokens
   },
   'gemini-1.5-flash': {
     input: 0.0001, // per 1K input tokens
@@ -107,6 +107,7 @@ function getModel(): BaseChatModel {
     handleLLMEnd: async (output, runId, parentRunId, tags) => {
       const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL
       const costs = MODEL_COSTS[modelName as keyof typeof MODEL_COSTS]
+
       core.info(`Model: ${modelName}`)
       core.info(`costs: ${costs}`)
 
