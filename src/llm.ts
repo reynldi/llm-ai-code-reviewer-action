@@ -237,7 +237,7 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 ${pullRequestContext}`)
   ])
 
-  const metrics = calculateTokens(response)
+  calculateTokens(response)
 
   return { messages: [response] }
 }
@@ -256,7 +256,7 @@ async function knowledgeUpdatesAgentNode(
 
   const modelWithTools = model.bindTools!(knowledgeBaseTools)
 
-  const response = await modelWithTools.invoke([
+  const response = await invokeWithRetry(modelWithTools, [
     ...state.messages,
     new HumanMessage(`Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
@@ -459,7 +459,7 @@ async function replyReviewCommentsAgentNode(
         ]
 
       if (lastComment.user.login !== githubAuthenticatedUserLogin) {
-        const response = await model.invoke([
+        const response = await invokeWithRetry(model, [
           ...state.messages,
           new HumanMessage(`Please reply this code review comments conversation:
 Diff Hunk:

@@ -52536,14 +52536,14 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 # Repository and Pull Request Information
 ${pullRequestContext}`)
     ]);
-    const metrics = calculateTokens(response);
+    calculateTokens(response);
     return { messages: [response] };
 }
 async function knowledgeUpdatesAgentNode(state) {
     core.info('[LLM] - Updating knowledges...');
     const model = getModel();
     const modelWithTools = model.bindTools(llm_tools_1.knowledgeBaseTools);
-    const response = await modelWithTools.invoke([
+    const response = await invokeWithRetry(modelWithTools, [
         ...state.messages,
         new messages_1.HumanMessage(`Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
@@ -52675,7 +52675,7 @@ async function replyReviewCommentsAgentNode(state) {
             repliesMap[topLevelComment.id].length) {
             const lastComment = repliesMap[topLevelComment.id][repliesMap[topLevelComment.id].length - 1];
             if (lastComment.user.login !== githubAuthenticatedUserLogin) {
-                const response = await model.invoke([
+                const response = await invokeWithRetry(model, [
                     ...state.messages,
                     new messages_1.HumanMessage(`Please reply this code review comments conversation:
 Diff Hunk:
