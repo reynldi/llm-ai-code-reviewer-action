@@ -26,7 +26,6 @@ import { PullRequestReviewComment } from './types'
 import { tool } from '@langchain/core/tools'
 import { knowledgeBaseTools, knowledgeBaseToolsNode } from './llm_tools'
 import { wait } from './utils'
-import { CallbackManager } from '@langchain/core/callbacks/manager'
 
 const AI_PROVIDER = core.getInput('ai_provider', {
   required: true,
@@ -58,6 +57,9 @@ const AI_PROVIDER_GEMINI = 'GEMINI'
 const FILE_CHANGES_PATCH_TEXT_LIMIT = 10000
 const FULL_SOURCE_CODE_TEXT_LIMIT = 10000
 
+const GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS = 0.1
+const GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS = 0.4
+
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
@@ -73,66 +75,8 @@ const StateAnnotation = Annotation.Root({
   })
 })
 
-const MODEL_COSTS = {
-  'gemini-1.5-pro': {
-    input: 0.00025, // per 1K input tokens
-    output: 0.0005 // per 1K output tokens
-  },
-  'gemini-1.5-flash': {
-    input: 0.0001, // per 1K input tokens
-    output: 0.0002 // per 1K output tokens
-  },
-  'mixtral-8x7b-32768': {
-    input: 0.0027, // per 1K input tokens
-    output: 0.0027 // per 1K output tokens
-  }
-} as const
-
-interface CostTracker {
-  inputTokens: number
-  outputTokens: number
-  totalCost: number
-}
-
-let costTracker: CostTracker = {
-  inputTokens: 0,
-  outputTokens: 0,
-  totalCost: 0
-}
-
 function getModel(): BaseChatModel {
   let model: BaseChatModel | undefined
-
-  const callbacks = CallbackManager.fromHandlers({
-    handleLLMEnd: async (output, runId, parentRunId, tags) => {
-      const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL
-      const costs = MODEL_COSTS[modelName as keyof typeof MODEL_COSTS]
-
-      if (costs) {
-        const inputCost =
-          ((output.llmOutput?.tokenUsage?.promptTokens || 0) * costs.input) /
-          1000
-        const outputCost =
-          ((output.llmOutput?.tokenUsage?.completionTokens || 0) *
-            costs.output) /
-          1000
-
-        costTracker.inputTokens +=
-          output.llmOutput?.tokenUsage?.promptTokens || 0
-        costTracker.outputTokens +=
-          output.llmOutput?.tokenUsage?.completionTokens || 0
-        costTracker.totalCost += inputCost + outputCost
-
-        core.info(`[Cost Tracking] Model: ${modelName}`)
-        core.info(`Input Tokens: ${output.llmOutput?.tokenUsage?.promptTokens}`)
-        core.info(
-          `Output Tokens: ${output.llmOutput?.tokenUsage?.completionTokens}`
-        )
-        core.info(`Cost for this call: $${(inputCost + outputCost).toFixed(4)}`)
-        core.info(`Total cost so far: $${costTracker.totalCost.toFixed(4)}`)
-      }
-    }
-  })
 
   if (AI_PROVIDER === AI_PROVIDER_GROQ && GROQ_API_KEY) {
     model = new ChatGroq({
@@ -140,16 +84,14 @@ function getModel(): BaseChatModel {
       temperature: 0,
       maxTokens: undefined,
       maxRetries: 2,
-      apiKey: GROQ_API_KEY,
-      callbacks: callbacks
+      apiKey: GROQ_API_KEY
     })
   } else if (AI_PROVIDER === AI_PROVIDER_GEMINI && GOOGLE_GEMINI_API_KEY) {
     model = new ChatGoogleGenerativeAI({
       model: AI_PROVIDER_MODEL,
       apiKey: GOOGLE_GEMINI_API_KEY,
       temperature: 0,
-      maxRetries: 2,
-      callbacks: callbacks
+      maxRetries: 2
     })
   } else {
     core.setFailed(`API KEY for provider: ${AI_PROVIDER} is not provided!`)
@@ -194,21 +136,34 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 ${pullRequestContext}`)
   ])
 
+  const inputTokens =
+    (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
+  const outputTokens =
+    (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
+
+  const inputCost =
+    (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
+  const outputCost =
+    (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
+  const totalCost = inputCost + outputCost
+
+  core.info(
+    `[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`
+  )
+  core.info(
+    `[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`
+  )
+  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
+
   return { messages: [response] }
 }
 
 async function knowledgeUpdatesAgentNode(
   state: typeof StateAnnotation.State
-): Promise<
-  | {
-      messages: BaseMessage[]
-    }
-  | undefined
-> {
+): Promise<{ messages: BaseMessage[] } | undefined> {
   core.info('[LLM] - Updating knowledges...')
 
   const model = getModel()
-
   const modelWithTools = model.bindTools!(knowledgeBaseTools)
 
   const response = await modelWithTools.invoke([
@@ -216,6 +171,25 @@ async function knowledgeUpdatesAgentNode(
     new HumanMessage(`Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
   ])
+
+  const inputTokens =
+    (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
+  const outputTokens =
+    (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
+
+  const inputCost =
+    (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
+  const outputCost =
+    (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
+  const totalCost = inputCost + outputCost
+
+  core.info(
+    `[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`
+  )
+  core.info(
+    `[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`
+  )
+  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
 
   return { messages: [response] }
 }
@@ -253,6 +227,8 @@ async function reviewCommentsAgentNode(
   const listFiles = await getListFiles()
 
   const comments: PullRequestReviewComment[] = []
+  let totalInputTokens = 0
+  let totalOutputTokens = 0
 
   for (let i = 0; i < listFiles.length; i++) {
     const listFile = listFiles[i]
@@ -293,6 +269,15 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 ===================================`)
     ])
 
+    // Calculate costs for this file review
+    const inputTokens =
+      (response as any).additional_kwargs?.tokenCount?.inputTokens || 0
+    const outputTokens =
+      (response as any).additional_kwargs?.tokenCount?.outputTokens || 0
+
+    totalInputTokens += inputTokens
+    totalOutputTokens += outputTokens
+
     if (response.tool_calls?.length) {
       const tool_call_args = response.tool_calls[0].args
 
@@ -307,6 +292,21 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 
     await wait(1000)
   }
+
+  const totalInputCost =
+    (totalInputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
+  const totalOutputCost =
+    (totalOutputTokens / 1_000_000) *
+    GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
+  const totalCost = totalInputCost + totalOutputCost
+
+  core.info(
+    `[LLM Pricing] - Total input tokens: ${totalInputTokens} ($${totalInputCost.toFixed(6)})`
+  )
+  core.info(
+    `[LLM Pricing] - Total output tokens: ${totalOutputTokens} ($${totalOutputCost.toFixed(6)})`
+  )
+  core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`)
 
   return { comments }
 }
@@ -482,9 +482,4 @@ export async function reviewPullRequest(): Promise<void> {
     },
     { configurable: { thread_id: '42' } }
   )
-
-  core.info('\n=== Final Cost Summary ===')
-  core.info(`Total Input Tokens: ${costTracker.inputTokens}`)
-  core.info(`Total Output Tokens: ${costTracker.outputTokens}`)
-  core.info(`Total Cost: $${costTracker.totalCost.toFixed(4)}`)
 }

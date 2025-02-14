@@ -52388,7 +52388,6 @@ const zod_1 = __nccwpck_require__(34809);
 const tools_1 = __nccwpck_require__(3477);
 const llm_tools_1 = __nccwpck_require__(45952);
 const utils_1 = __nccwpck_require__(71798);
-const manager_1 = __nccwpck_require__(23544);
 const AI_PROVIDER = core.getInput('ai_provider', {
     required: true,
     trimWhitespace: true
@@ -52413,6 +52412,8 @@ const AI_PROVIDER_GROQ = 'GROQ';
 const AI_PROVIDER_GEMINI = 'GEMINI';
 const FILE_CHANGES_PATCH_TEXT_LIMIT = 10000;
 const FULL_SOURCE_CODE_TEXT_LIMIT = 10000;
+const GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS = 0.1;
+const GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS = 0.4;
 const StateAnnotation = langgraph_2.Annotation.Root({
     messages: (0, langgraph_2.Annotation)({
         reducer: (x, y) => x.concat(y),
@@ -52425,58 +52426,15 @@ const StateAnnotation = langgraph_2.Annotation.Root({
         default: () => []
     })
 });
-const MODEL_COSTS = {
-    'gemini-1.5-pro': {
-        input: 0.00025, // per 1K input tokens
-        output: 0.0005 // per 1K output tokens
-    },
-    'gemini-1.5-flash': {
-        input: 0.0001, // per 1K input tokens
-        output: 0.0002 // per 1K output tokens
-    },
-    'mixtral-8x7b-32768': {
-        input: 0.0027, // per 1K input tokens
-        output: 0.0027 // per 1K output tokens
-    }
-};
-let costTracker = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalCost: 0
-};
 function getModel() {
     let model;
-    const callbacks = manager_1.CallbackManager.fromHandlers({
-        handleLLMEnd: async (output, runId, parentRunId, tags) => {
-            const modelName = output.llmOutput?.modelName || AI_PROVIDER_MODEL;
-            const costs = MODEL_COSTS[modelName];
-            if (costs) {
-                const inputCost = ((output.llmOutput?.tokenUsage?.promptTokens || 0) * costs.input) /
-                    1000;
-                const outputCost = ((output.llmOutput?.tokenUsage?.completionTokens || 0) *
-                    costs.output) /
-                    1000;
-                costTracker.inputTokens +=
-                    output.llmOutput?.tokenUsage?.promptTokens || 0;
-                costTracker.outputTokens +=
-                    output.llmOutput?.tokenUsage?.completionTokens || 0;
-                costTracker.totalCost += inputCost + outputCost;
-                core.info(`[Cost Tracking] Model: ${modelName}`);
-                core.info(`Input Tokens: ${output.llmOutput?.tokenUsage?.promptTokens}`);
-                core.info(`Output Tokens: ${output.llmOutput?.tokenUsage?.completionTokens}`);
-                core.info(`Cost for this call: $${(inputCost + outputCost).toFixed(4)}`);
-                core.info(`Total cost so far: $${costTracker.totalCost.toFixed(4)}`);
-            }
-        }
-    });
     if (AI_PROVIDER === AI_PROVIDER_GROQ && GROQ_API_KEY) {
         model = new groq_1.ChatGroq({
             model: AI_PROVIDER_MODEL,
             temperature: 0,
             maxTokens: undefined,
             maxRetries: 2,
-            apiKey: GROQ_API_KEY,
-            callbacks: callbacks
+            apiKey: GROQ_API_KEY
         });
     }
     else if (AI_PROVIDER === AI_PROVIDER_GEMINI && GOOGLE_GEMINI_API_KEY) {
@@ -52484,8 +52442,7 @@ function getModel() {
             model: AI_PROVIDER_MODEL,
             apiKey: GOOGLE_GEMINI_API_KEY,
             temperature: 0,
-            maxRetries: 2,
-            callbacks: callbacks
+            maxRetries: 2
         });
     }
     else {
@@ -52519,6 +52476,14 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 # Repository and Pull Request Information
 ${pullRequestContext}`)
     ]);
+    const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
+    const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
+    const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
+    const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
+    const totalCost = inputCost + outputCost;
+    core.info(`[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
     return { messages: [response] };
 }
 async function knowledgeUpdatesAgentNode(state) {
@@ -52530,6 +52495,14 @@ async function knowledgeUpdatesAgentNode(state) {
         new messages_1.HumanMessage(`Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
     ]);
+    const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
+    const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
+    const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
+    const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
+    const totalCost = inputCost + outputCost;
+    core.info(`[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
     return { messages: [response] };
 }
 async function reviewCommentsAgentNode(state) {
@@ -52552,6 +52525,8 @@ async function reviewCommentsAgentNode(state) {
     const modelWithStructuredOutput = model.bindTools([finalResponseTool]);
     const listFiles = await (0, github_1.getListFiles)();
     const comments = [];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
     for (let i = 0; i < listFiles.length; i++) {
         const listFile = listFiles[i];
         core.info(`[LLM] - Reviewing file: ${listFile.filename} ...`);
@@ -52587,6 +52562,11 @@ ${fullFileContent.substring(0, FULL_SOURCE_CODE_TEXT_LIMIT)}
 ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 ===================================`)
         ]);
+        // Calculate costs for this file review
+        const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
+        const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
+        totalInputTokens += inputTokens;
+        totalOutputTokens += outputTokens;
         if (response.tool_calls?.length) {
             const tool_call_args = response.tool_calls[0].args;
             if (!tool_call_args.skip) {
@@ -52599,6 +52579,13 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
         }
         await (0, utils_1.wait)(1000);
     }
+    const totalInputCost = (totalInputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
+    const totalOutputCost = (totalOutputTokens / 1_000_000) *
+        GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
+    const totalCost = totalInputCost + totalOutputCost;
+    core.info(`[LLM Pricing] - Total input tokens: ${totalInputTokens} ($${totalInputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total output tokens: ${totalOutputTokens} ($${totalOutputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
     return { comments };
 }
 async function reviewSummaryAgentNode(state) {
@@ -52708,10 +52695,6 @@ async function reviewPullRequest() {
     await graph.invoke({
         messages: []
     }, { configurable: { thread_id: '42' } });
-    core.info('\n=== Final Cost Summary ===');
-    core.info(`Total Input Tokens: ${costTracker.inputTokens}`);
-    core.info(`Total Output Tokens: ${costTracker.outputTokens}`);
-    core.info(`Total Cost: $${costTracker.totalCost.toFixed(4)}`);
 }
 
 
@@ -60238,13 +60221,6 @@ module.exports = __nccwpck_require__(63117);
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 module.exports = __nccwpck_require__(71017);
-
-/***/ }),
-
-/***/ 23544:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-module.exports = __nccwpck_require__(67225);
 
 /***/ }),
 
