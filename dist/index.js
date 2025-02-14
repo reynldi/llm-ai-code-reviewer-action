@@ -52649,9 +52649,35 @@ Review Comment: ${comment.comment}
 =========================`)}`)
     ]);
     calculateTokens(response);
-    if (response.tool_calls?.length) {
-        const tool_call_args = response.tool_calls[0].args;
-        await (0, github_1.submitReview)(tool_call_args.review_summary, state.comments, tool_call_args.review_action);
+    const tool_call_args = response.tool_calls?.[0].args;
+    // Check for existing comments with "Summary of Changes"
+    const existingComments = await (0, github_1.getListReviewComments)();
+    const summaryTitle = 'Summary of Changes';
+    const existingSummaryComment = existingComments.find(comment => comment.body.includes(summaryTitle));
+    // Filter out existing comments from state.comments to avoid duplication
+    const uniqueComments = state.comments.filter(comment => !existingComments.some(existingComment => existingComment.body.includes(comment.comment)));
+    if (existingSummaryComment) {
+        // If a summary comment exists, check for duplication
+        if (tool_call_args) {
+            const newSummary = tool_call_args.review_summary;
+            if (existingSummaryComment.body !== newSummary) {
+                // Update the existing comment if it's different
+                await (0, github_1.replyToReviewComment)(existingSummaryComment.id, newSummary);
+            }
+        }
+        else {
+            core.error('Tool call arguments are undefined.');
+        }
+    }
+    else {
+        // If no summary comment exists, create a new one
+        if (tool_call_args) {
+            await (0, github_1.submitReview)(tool_call_args.review_summary, uniqueComments, // Use filtered comments to avoid duplication
+            tool_call_args.review_action);
+        }
+        else {
+            core.error('Tool call arguments are undefined. Cannot submit review.');
+        }
     }
     return { messages: [] };
 }
