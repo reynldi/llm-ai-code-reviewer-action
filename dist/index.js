@@ -52498,14 +52498,11 @@ function getModel() {
     }
     return model;
 }
-async function inputUnderstandingAgentNode(
-// eslint-disable-next-line
-_state) {
+async function inputUnderstandingAgentNode(_state) {
     core.info('[LLM] - Understanding the input...');
     const pullRequestContext = await (0, github_1.getPullRequestContext)();
-    const model = getModel();
-    const response = await model.invoke([
-        new messages_1.HumanMessage(`Please answer these questions under two sections based on given repository informations:
+    // Calculate input tokens
+    const promptTemplate = `Please answer these questions under two sections based on given repository informations:
 - Understanding given repository information (e.g README file, folder structure, etc.)
 - What framework is used?
 - What kind of coding styles are used?
@@ -52516,25 +52513,63 @@ _state) {
 - What's the impact of this pull request?
 - Understanding the business / domain logic context?
 - What's the high overview of the business / domain in this repository?
-- What's the high overview about the business / domain logic?
+- What's the high overview about the business / domain logic?`;
+    const inputTokens = estimateTokens(promptTemplate + CODEBASE_HIGH_OVERVIEW_DESCRIPTION + pullRequestContext);
+    const inputCost = calculateCost(inputTokens, 'input');
+    core.info(`[LLM Cost] Input Understanding - Input Tokens: ${inputTokens}`);
+    core.info(`[LLM Cost] Input Understanding - Estimated Input Cost: $${inputCost.toFixed(3)}`);
+    const model = getModel();
+    const response = await model.invoke([
+        new messages_1.HumanMessage(`${promptTemplate}
 
 # Codebase High Overview Description
 ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 # Repository and Pull Request Information
 ${pullRequestContext}`)
     ]);
+    // Calculate output tokens
+    const outputTokens = estimateTokens(response.content);
+    const outputCost = calculateCost(outputTokens, 'output');
+    core.info(`[LLM Cost] Input Understanding - Output Tokens: ${outputTokens}`);
+    core.info(`[LLM Cost] Input Understanding - Estimated Output Cost: $${outputCost.toFixed(3)}`);
+    core.info(`[LLM Cost] Input Understanding - Total Cost: $${(inputCost + outputCost).toFixed(3)}`);
     return { messages: [response] };
 }
 async function knowledgeUpdatesAgentNode(state) {
     core.info('[LLM] - Updating knowledges...');
+    // Calculate input tokens from state messages
+    const stateMessagesContent = state.messages.map(msg => msg.content).join('');
+    const promptContent = 'Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools';
+    const inputTokens = estimateTokens(stateMessagesContent + promptContent);
+    const inputCost = calculateCost(inputTokens, 'input');
+    core.info(`[LLM Cost] Knowledge Updates - Input Tokens: ${inputTokens}`);
+    core.info(`[LLM Cost] Knowledge Updates - Estimated Input Cost: $${inputCost.toFixed(3)}`);
     const model = getModel();
     const modelWithTools = model.bindTools(llm_tools_1.knowledgeBaseTools);
     const response = await modelWithTools.invoke([
         ...state.messages,
-        new messages_1.HumanMessage(`Based on given high overview information about the pull request, please gather needed knowledge updates from the internet by using given tools
-(e.g latest library versions, framework updates, best practices, concepts, etc.)`)
+        new messages_1.HumanMessage(promptContent)
     ]);
+    // Calculate output tokens
+    const outputTokens = estimateTokens(response.content);
+    const outputCost = calculateCost(outputTokens, 'output');
+    core.info(`[LLM Cost] Knowledge Updates - Output Tokens: ${outputTokens}`);
+    core.info(`[LLM Cost] Knowledge Updates - Estimated Output Cost: $${outputCost.toFixed(3)}`);
+    core.info(`[LLM Cost] Knowledge Updates - Total Cost: $${(inputCost + outputCost).toFixed(3)}`);
     return { messages: [response] };
+}
+// Helper functions for token and cost calculation
+function estimateTokens(text) {
+    // Rough estimation: ~4 characters per token
+    return Math.ceil(text.length / 4);
+}
+function calculateCost(tokens, type) {
+    // GPT-4 pricing
+    const COST_PER_1K_TOKENS = {
+        input: 0.03,
+        output: 0.06
+    };
+    return (tokens / 1000) * COST_PER_1K_TOKENS[type];
 }
 async function reviewCommentsAgentNode(state) {
     core.info('[LLM] - Reviewing code changes...');
