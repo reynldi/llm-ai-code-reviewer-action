@@ -52615,6 +52615,14 @@ Position: ${comment.position}
 Review Comment: ${comment.comment}
 =========================`)}`)
     ]);
+    const inputTokens = response.additional_kwargs?.tokenCount?.inputTokens || 0;
+    const outputTokens = response.additional_kwargs?.tokenCount?.outputTokens || 0;
+    const inputCost = (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS;
+    const outputCost = (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS;
+    const totalCost = inputCost + outputCost;
+    core.info(`[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`);
+    core.info(`[LLM Pricing] - Total cost: $${totalCost.toFixed(6)}`);
     if (response.tool_calls?.length) {
         const tool_call_args = response.tool_calls[0].args;
         await (0, github_1.submitReview)(tool_call_args.review_summary, state.comments, tool_call_args.review_action);
