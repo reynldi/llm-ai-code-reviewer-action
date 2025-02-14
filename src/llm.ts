@@ -57,6 +57,78 @@ const AI_PROVIDER_GEMINI = 'GEMINI'
 const FILE_CHANGES_PATCH_TEXT_LIMIT = 10000
 const FULL_SOURCE_CODE_TEXT_LIMIT = 10000
 
+const GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS = 0.1 // $0.10 per 1M tokens
+const GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS = 0.4 // $0.40 per 1M tokens
+
+interface GlobalTokenMetrics {
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number
+}
+
+const globalMetrics: GlobalTokenMetrics = {
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  totalCost: 0
+}
+
+interface TokenMetrics {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  inputCost: number
+  outputCost: number
+  totalCost: number
+}
+
+function calculateTokens(response: any): TokenMetrics {
+  const inputTokens = response.usage_metadata?.input_tokens || 0
+  const outputTokens = response.usage_metadata?.output_tokens || 0
+  const totalTokens = response.usage_metadata?.total_tokens || 0
+
+  const inputCost =
+    (inputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS
+  const outputCost =
+    (outputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS
+  const totalCost = inputCost + outputCost
+
+  // Update global metrics
+  globalMetrics.totalInputTokens += inputTokens
+  globalMetrics.totalOutputTokens += outputTokens
+  globalMetrics.totalCost += totalCost
+
+  core.info(
+    `[LLM Pricing] - Input tokens: ${inputTokens} ($${inputCost.toFixed(6)})`
+  )
+  core.info(
+    `[LLM Pricing] - Output tokens: ${outputTokens} ($${outputCost.toFixed(6)})`
+  )
+  core.info(
+    `[LLM Pricing] - Total tokens: ${totalTokens} ($${totalCost.toFixed(6)})`
+  )
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    inputCost,
+    outputCost,
+    totalCost
+  }
+}
+
+function logFinalMetrics(): void {
+  core.info('=== Final LLM Usage Metrics ===')
+  core.info(
+    `Total Input Tokens: ${globalMetrics.totalInputTokens} ($${((globalMetrics.totalInputTokens / 1_000_000) * GEMINI_FLASH_INPUT_PRICE_PER_MILLION_TOKENS).toFixed(6)})`
+  )
+  core.info(
+    `Total Output Tokens: ${globalMetrics.totalOutputTokens} ($${((globalMetrics.totalOutputTokens / 1_000_000) * GEMINI_FLASH_OUTPUT_PRICE_PER_MILLION_TOKENS).toFixed(6)})`
+  )
+  core.info(`Total Cost: $${globalMetrics.totalCost.toFixed(6)}`)
+  core.info('============================')
+}
+
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
@@ -133,15 +205,8 @@ ${CODEBASE_HIGH_OVERVIEW_DESCRIPTION}
 ${pullRequestContext}`)
   ])
 
-  core.info(
-    `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
-  )
-  core.info(
-    `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
-  )
-  core.info(
-    `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
-  )
+  const metrics = calculateTokens(response)
+
   return { messages: [response] }
 }
 
@@ -165,15 +230,7 @@ async function knowledgeUpdatesAgentNode(
 (e.g latest library versions, framework updates, best practices, concepts, etc.)`)
   ])
 
-  core.info(
-    `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
-  )
-  core.info(
-    `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
-  )
-  core.info(
-    `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
-  )
+  calculateTokens(response)
 
   return { messages: [response] }
 }
@@ -251,15 +308,7 @@ ${listFile.patch?.substring(0, FILE_CHANGES_PATCH_TEXT_LIMIT) || ''}
 ===================================`)
     ])
 
-    core.info(
-      `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
-    )
-    core.info(
-      `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
-    )
-    core.info(
-      `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
-    )
+    calculateTokens(response)
 
     if (response.tool_calls?.length) {
       const tool_call_args = response.tool_calls[0].args
@@ -321,15 +370,7 @@ Review Comment: ${comment.comment}
 )}`)
   ])
 
-  core.info(
-    `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
-  )
-  core.info(
-    `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
-  )
-  core.info(
-    `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
-  )
+  calculateTokens(response)
 
   if (response.tool_calls?.length) {
     const tool_call_args = response.tool_calls[0].args
@@ -397,15 +438,7 @@ ${repliesMap[topLevelComment.id].map(comment => `- ${comment.user.login === gith
 `)
         ])
 
-        core.info(
-          `[LLM Pricing] - Input tokens: ${response.usage_metadata?.input_tokens}`
-        )
-        core.info(
-          `[LLM Pricing] - Output tokens: ${response.usage_metadata?.output_tokens}`
-        )
-        core.info(
-          `[LLM Pricing] - Total tokens: ${response.usage_metadata?.total_tokens}`
-        )
+        calculateTokens(response)
 
         await replyToReviewComment(
           topLevelComment.id,
@@ -470,4 +503,6 @@ export async function reviewPullRequest(): Promise<void> {
     },
     { configurable: { thread_id: '42' } }
   )
+
+  logFinalMetrics()
 }
